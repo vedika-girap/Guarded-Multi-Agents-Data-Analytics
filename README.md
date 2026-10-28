@@ -90,12 +90,10 @@ pytest
 
 ## Project status
 
-Actively under development as a portfolio project. See the roadmap above.
+Actively under development. See the roadmap above.
 
-## License
 
-MIT, see `LICENSE`.
 
 ## Author
 
-<Your name> · <LinkedIn> · <Email>
+Vedika Girap · vedikagirap5@gmail.com
