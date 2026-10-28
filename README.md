@@ -1,4 +1,4 @@
-# Secure Multi-Agent Analytics
+# Guarded Multi-Agent Analytics
 
 A GenAI analytics backend where users ask business questions in plain English and a team of LLM agents answers them from **SQL data** and **internal documents**, while enforcing who is allowed to see what.
 
@@ -33,17 +33,6 @@ Client -> FastAPI -> Auth (verified JWT claims)
 
 Python, FastAPI, LangGraph, OpenAI API, SQLite (demo) / PostgreSQL (production), FAISS, Alembic, pytest, Docker, GitHub Actions
 
-## Roadmap
-
-Built in small stages; every stage leaves the app runnable.
-
-- [x] Baseline: multi-agent flow with demo SQLite data
-- [ ] Stage 1: Explicit config loading, required settings, verified identity
-- [ ] Stage 2: PostgreSQL, read-only role, approved views, row-level security
-- [ ] Stage 3: Permission-aware retrieval, hybrid search (BM25 + vector)
-- [ ] Stage 4: Latency profiling, explicit error handling, structured logs
-- [ ] Stage 5: Evaluation suite as a CI release gate
-- [ ] Stage 6: Docker, CI/CD, health checks, backups, rate limits
 
 ## Quick start
 
