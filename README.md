@@ -32,7 +32,7 @@ The production column is a target, not a claim about current capabilities. Do no
 
 ## Architecture
 
-![Guarded Multi-Agent Analytics Architecture](https://raw.githubusercontent.com/vedika-girap/Guarded-Multi-Agents-Data-Analytics/main/docs/architecture.png)
+![Guarded Multi-Agent Analytics Architecture](docs/Guarded%20Multi%20Agents%20Data%20Analytics%20Architecture.png)
 
 ## Tech stack
 
