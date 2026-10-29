@@ -2,8 +2,10 @@ __pycache__/
 *.py[cod]
 .venv/
 *.db
+/data/chroma/
 .pytest_cache/
 .env
 .env.*
-!.env.example
+.env.example
+!README.md
 *.md

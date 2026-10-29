@@ -24,7 +24,7 @@ def _question_tokens(question: str, model: str) -> int:
 
 def enforce_request_limits(identity: Identity, question: str, settings: Settings | None = None) -> None:
     settings = settings or get_settings()
-    if _question_tokens(question, settings.openai_model) > settings.max_question_tokens:
+    if _question_tokens(question, settings.gemini_model) > settings.max_question_tokens:
         raise HTTPException(
             status_code=413,
             detail={"error_code": "QUESTION_TOKEN_LIMIT", "message": "The question exceeds the token limit for this environment."},

@@ -25,9 +25,15 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "staging", "production"] = "development"
     auth_mode: Literal["dev", "jwt"] = "dev"
-    openai_api_key: SecretStr | None = None
-    openai_model: str = "gpt-6-astra"
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_embedding_model: str = "gemini-embedding-001"
     llm_max_output_tokens: int = Field(default=700, gt=0, le=8192)
+
+    database_url: str = "sqlite:///data/demo.db"
+    migration_database_url: str | None = None
+    database_statement_timeout_ms: int = Field(default=5000, gt=0)
+    viewer_min_group_size: int = Field(default=3, ge=2)
 
     # >>> ACTION REQUIRED (Stage 1): Set all three JWT variables when AUTH_MODE=jwt.
     # See README section "Setup checklist".

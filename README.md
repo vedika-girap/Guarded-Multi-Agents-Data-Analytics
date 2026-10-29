@@ -33,22 +33,16 @@ The production column is a target, not a claim about current capabilities. Do no
 ## Architecture
 
 ```
-Client -> FastAPI -> Auth (verified JWT claims)
-                        |
-                   Agent graph (LangGraph)
-                  /          |           \
-          Router        SQL agent      RAG agent
-                           |               |
-                   SQL validator      Permission filter
-                           |               |
-                 PostgreSQL (RLS)   BM25 + vector search
+Client -> FastAPI -> verified identity -> LangGraph router
+                                           /          \
+                         SQL validation/execution    document retrieval
+                         SQLite or PostgreSQL RLS    tenant/role filter
+                                                      BM25 + optional Chroma
 ```
-
-<Replace with a real diagram once Stage 3 is done.>
 
 ## Tech stack
 
-Python, FastAPI, LangGraph, Gemini API, SQLite (demo) / PostgreSQL, SQLGlot, Alembic, pytest, Docker
+Python, FastAPI, LangGraph, Gemini API, SQLite (demo) / PostgreSQL, SQLGlot, Alembic, ChromaDB, pytest, Docker
 
 
 ## Quick start
@@ -79,6 +73,7 @@ All settings live in `.env` (never commit this file). Every variable is document
 |---|---|---|---|
 | `GEMINI_API_KEY` | Gemini model access | Google AI Studio API keys | Optional; required for LLM responses |
 | `GEMINI_MODEL` | Gemini model name | Gemini API model catalog | Has default: `gemini-3.8-flash` |
+| `GEMINI_EMBEDDING_MODEL` | Embedding model for semantic document search | Gemini API model catalog | Has default: `gemini-embedding-001` |
 | `ENVIRONMENT` | `development`, `staging` or `production` | You choose | Has default |
 | `AUTH_MODE` | `dev` fixed identity or `jwt` verification | You choose; production requires `jwt` | Has default: `dev` |
 | `AUTH_JWT_SECRET` | HS256 verification secret (32+ bytes) | Your identity provider/shared-secret provisioning | Required with `AUTH_MODE=jwt` |
@@ -91,8 +86,6 @@ All settings live in `.env` (never commit this file). Every variable is document
 | `POSTGRES_PASSWORD` | Local PostgreSQL administrator password for Compose | Generate locally; do not commit | Required only for Compose |
 | `APP_DB_PASSWORD` | Local read-only app role password for Compose | Generate locally; do not commit | Required only for Compose |
 
-<Add rows as each stage introduces new variables.>
-
 ## Security notes
 
 - API keys stay server-side; rotate them regularly
@@ -100,12 +93,34 @@ All settings live in `.env` (never commit this file). Every variable is document
 - Dev-only auth mode is refused in production
 - Generated SQL is validated by a parser and schema allowlist, then executed under a read-only database role
 - PostgreSQL access uses an approved view and a tenant-scoped row-level security policy; SQLite adds the tenant predicate in application code
+- Document passages are filtered by tenant and minimum role before ranking; Gemini embeddings are searched in Chroma and fused with SQLite BM25 results
+
+## Document ingestion and semantic search
+
+The included reporting documents are seeded automatically. To ingest `.txt` and `.md` files, first start the API once (or run `python -c "from app.ingestion.seed import initialize; initialize()"`), then run:
+
+```powershell
+python -m app.ingestion.documents .\my-documents --tenant-id local-dev-tenant --min-role viewer
+```
+
+Supported minimum roles are `viewer`, `analyst`, and `admin`. The tenant must match the authenticated tenant claim. Files are split into overlapping chunks and indexed in the local SQLite FTS table. Choose the minimum role deliberately; it controls which roles can retrieve the chunks. Re-running ingestion for the same directory synchronizes it: unchanged files remain idempotent, and changed or deleted source files have stale chunks removed from SQLite and Chroma.
+
+To build the optional Chroma semantic index, configure `GEMINI_API_KEY` and then run:
+
+```powershell
+python -m app.ingestion.index_vectors
+```
+
+When vectors exist, search fuses Chroma semantic results with BM25 using reciprocal-rank fusion. Chroma stores its local index under `data/chroma/`; this persistent client is intended for local development and testing. For a deployed service, use a server-backed Chroma deployment and secure its network and access. If Gemini is not configured, the index has not been built, or semantic search fails, retrieval falls back to BM25. Document passages and their authoritative access metadata remain in SQLite even when sales data uses PostgreSQL.
 
 ## Testing
 
 ```bash
-pytest
+python -m pytest -q
+python -m app.evaluation.run
 ```
+
+The offline evaluation prints measured BM25 hit@3, supported workflow rate, SQL rejection rate, tenant/role enforcement checks, and p50/p95 local workflow latency. Change the number of runs with `python -m app.evaluation.run --iterations 20`. It disables Gemini calls so results are repeatable and do not consume API quota. LLM answer groundedness is not included in this offline score; that requires a labeled, human-reviewed live-model evaluation set.
 
 ## PostgreSQL local testing
 
@@ -139,6 +154,7 @@ The PostgreSQL cross-tenant integration test runs when `TEST_POSTGRES_URL` point
 | `AUTH_JWT_AUDIENCE` | Expected API audience | Identity provider/API registration | Required for `AUTH_MODE=jwt` | Unset |
 | `GEMINI_API_KEY` | Gemini model credential | Create in Google AI Studio | Optional; required for model answers | Unset |
 | `GEMINI_MODEL` | Gemini model ID | Gemini API model catalog | Optional | `gemini-3.8-flash` |
+| `GEMINI_EMBEDDING_MODEL` | Gemini embedding model ID for Chroma vectors | Gemini API model catalog | Optional | `gemini-embedding-001` |
 | `LLM_MAX_OUTPUT_TOKENS` | Maximum generated tokens per model call | Tune with evaluation | Optional | `700` |
 | `DATABASE_URL` | Runtime structured-data database | SQLite default, or PostgreSQL DSN | Optional | `sqlite:///data/demo.db` |
 | `MIGRATION_DATABASE_URL` | PostgreSQL owner/admin DSN for Alembic | PostgreSQL administrator | Required to apply PostgreSQL migrations | Unset |
@@ -157,8 +173,7 @@ Gemini's free tier is suitable for development experiments, subject to current m
 
 ## Project status
 
-Actively under development. See the roadmap above.
-
+Actively under development. See the [manual](manual.md), [CHANGELOG.md](CHANGELOG.md), and the scope notes near the top of this README.
 
 
 ## Author

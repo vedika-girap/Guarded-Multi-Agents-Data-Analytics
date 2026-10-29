@@ -12,3 +12,6 @@ class AskResponse(BaseModel):
     limitations: list[str]
     latency_ms: float
     llm_used: bool
+    model_status: str
+    node_timings_ms: dict[str, float]
+    provider_failures: list[str]

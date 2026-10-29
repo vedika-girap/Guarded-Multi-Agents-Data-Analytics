@@ -52,11 +52,11 @@ def test_jwt_mode_reports_all_missing_configuration_together():
 
 def test_process_environment_overrides_dotenv(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
-    env_file.write_text("ENVIRONMENT=staging\nOPENAI_MODEL=dotenv-model\n", encoding="utf-8")
-    monkeypatch.setenv("OPENAI_MODEL", "process-model")
+    env_file.write_text("ENVIRONMENT=staging\nGEMINI_MODEL=dotenv-model\n", encoding="utf-8")
+    monkeypatch.setenv("GEMINI_MODEL", "process-model")
     settings = Settings(_env_file=env_file)
     assert settings.environment == "staging"
-    assert settings.openai_model == "process-model"
+    assert settings.gemini_model == "process-model"
 
 
 def test_dev_auth_returns_fixed_viewer_and_ignores_role_escalation_header():

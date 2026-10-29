@@ -1,10 +1,9 @@
 import re
-import sqlite3
-
 import sqlglot
 from sqlglot import exp
 
-from app.config import DB_PATH, MAX_ROWS
+from app.config import MAX_ROWS, Settings, get_settings
+from app.database import connect_readonly, is_postgresql
 
 # Reviewed SQL templates used when the app runs without an LLM key.
 QUERIES = {
@@ -50,7 +49,13 @@ def validate_sql(sql: str) -> bool:
     allowed_columns = {"id", "sale_date", "region", "product", "amount"}
     if any(column.name.lower() not in allowed_columns for column in tree.find_all(exp.Column)):
         return False
-    allowed_functions = {"COUNT", "SUM", "AVG", "MIN", "MAX", "ROUND", "SUBSTR", "SUBSTRING"}
+    # SELECT * would expose internal tenant_id through either backend's sales view/table.
+    for star in tree.find_all(exp.Star):
+        if not isinstance(star.parent, exp.Count):
+            return False
+    allowed_functions = {"COUNT", "SUM", "AVG", "MIN", "MAX", "ROUND", "SUBSTR", "SUBSTRING", "AND", "OR", "NOT"}
+    if tree.find(exp.Placeholder):
+        return False
     for function in tree.find_all(exp.Func):
         try:
             function_name = function.sql_name().upper()
@@ -70,20 +75,47 @@ def is_aggregate(sql: str) -> bool:
     return any(function.sql_name().upper() in aggregate_names for function in tree.find_all(exp.Func))
 
 
-def execute_sql(sql: str, role: str) -> tuple[list[dict], str]:
-    """Validate generated SQL, enforce role granularity, and run with SQLite read-only."""
+def execute_sql(
+    sql: str,
+    role: str,
+    tenant_id: str = "local-dev-tenant",
+    settings: Settings | None = None,
+) -> tuple[list[dict], str]:
+    """Validate generated SQL, enforce tenant/role policy, and execute read-only."""
+    settings = settings or get_settings()
     if not validate_sql(sql):
         raise ValueError("Generated SQL did not pass the read-only schema policy")
     if role == "viewer" and not is_aggregate(sql):
         raise PermissionError("Viewer role can run aggregate queries only")
     tree = sqlglot.parse_one(sql, read="sqlite")
+    if role == "viewer":
+        # Suppress small cells to reduce the risk of disclosing an individual record.
+        minimum = exp.GTE(
+            this=exp.Count(this=exp.Star()),
+            expression=exp.Literal.number(settings.viewer_min_group_size),
+        )
+        existing_having = tree.args.get("having")
+        if existing_having:
+            tree.set("having", exp.Having(this=exp.and_(existing_having.this, minimum)))
+        else:
+            tree.set("having", exp.Having(this=minimum))
+    if not is_postgresql(settings):
+        # SQLite has no RLS; add the authenticated tenant predicate in application code.
+        tenant_filter = exp.EQ(this=exp.column("tenant_id"), expression=exp.Placeholder())
+        existing_where = tree.args.get("where")
+        if existing_where:
+            tree.set("where", exp.Where(this=exp.and_(existing_where.this, tenant_filter)))
+        else:
+            tree.set("where", exp.Where(this=tenant_filter))
     # Enforce the cap even if the model requested a larger LIMIT.
     tree = tree.limit(MAX_ROWS)
-    safe_sql = tree.sql(dialect="sqlite")
-    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as db:
-        db.set_progress_handler(lambda: 1, 100_000)
-        db.row_factory = sqlite3.Row
-        rows = db.execute(safe_sql).fetchmany(MAX_ROWS)
+    dialect = "postgres" if is_postgresql(settings) else "sqlite"
+    safe_sql = tree.sql(dialect=dialect)
+    with connect_readonly(tenant_id, role, settings) as db:
+        if is_postgresql(settings):
+            rows = db.execute(safe_sql).fetchmany(MAX_ROWS)
+        else:
+            rows = db.execute(safe_sql, (tenant_id,)).fetchmany(MAX_ROWS)
     return [dict(row) for row in rows], safe_sql
 
 
