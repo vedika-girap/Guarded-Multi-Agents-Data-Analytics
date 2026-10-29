@@ -8,6 +8,7 @@ google-genai>=1.0,<2
 sqlglot>=26,<30
 PyJWT>=2.8,<3
 tiktoken>=0.7,<1
+redis>=5,<7
 chromadb>=1.0,<2
 pytest>=8,<9
 SQLAlchemy>=2,<3

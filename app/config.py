@@ -49,11 +49,15 @@ class Settings(BaseSettings):
     dev_max_question_tokens: int = Field(default=4096, gt=0)
     staging_max_question_tokens: int = Field(default=2048, gt=0)
     production_max_question_tokens: int = Field(default=2048, gt=0)
+    rate_limit_redis_url: str | None = None
+    rate_limit_redis_timeout_seconds: float = Field(default=0.5, gt=0, le=10, validation_alias="RATE_LIMIT_REDIS_TIMEOUT_SECONDS")
 
     @model_validator(mode="after")
     def validate_auth_configuration(self) -> "Settings":
         if self.environment == "production" and self.auth_mode == "dev":
             raise ValueError("AUTH_MODE=dev is forbidden when ENVIRONMENT=production; configure AUTH_MODE=jwt.")
+        if self.environment == "production" and not self.rate_limit_redis_url:
+            raise ValueError("RATE_LIMIT_REDIS_URL is required in production for shared rate limiting.")
 
         if self.auth_mode == "jwt":
             missing = [

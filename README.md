@@ -85,6 +85,7 @@ All settings live in `.env` (never commit this file). Every variable is document
 | `VIEWER_MIN_GROUP_SIZE` | Minimum rows per viewer aggregate group | Set based on data disclosure policy | Has default: `3` |
 | `POSTGRES_PASSWORD` | Local PostgreSQL administrator password for Compose | Generate locally; do not commit | Required only for Compose |
 | `APP_DB_PASSWORD` | Local read-only app role password for Compose | Generate locally; do not commit | Required only for Compose |
+| `RATE_LIMIT_REDIS_URL` | Shared rate-limit store | Redis connection URL; required in production | Optional locally |
 
 ## Security notes
 
@@ -168,6 +169,10 @@ The PostgreSQL cross-tenant integration test runs when `TEST_POSTGRES_URL` point
 | `DEV_MAX_QUESTION_TOKENS` | Development question token limit | Tune for local use | Optional | `4096` |
 | `STAGING_MAX_QUESTION_TOKENS` | Staging question token limit | Tune for model/context | Optional | `2048` |
 | `PRODUCTION_MAX_QUESTION_TOKENS` | Production question token limit | Tune for model/context | Optional | `2048` |
+| `RATE_LIMIT_REDIS_URL` | Shared rate-limit store | Redis URL; required with `ENVIRONMENT=production` | Optional locally | Unset |
+| `RATE_LIMIT_REDIS_TIMEOUT_SECONDS` | Redis connection/read timeout | Tune for the service | Optional | `0.5` |
+
+For local shared-limiter development, start Redis with `docker compose --profile shared-limits up -d redis` and set `RATE_LIMIT_REDIS_URL=redis://localhost:6379/0`. Production requires Redis; use a managed service secured with authentication, TLS, and network controls.
 
 Gemini's free tier is suitable for development experiments, subject to current model quotas. Google marks free-tier prompts/responses as eligible for product improvement; avoid sending confidential or production data through a free-tier key. See the [Gemini API pricing and data-use details](https://ai.google.dev/gemini-api/docs/pricing) and [billing tiers](https://ai.google.dev/gemini-api/docs/billing).
 
