@@ -32,13 +32,7 @@ The production column is a target, not a claim about current capabilities. Do no
 
 ## Architecture
 
-```
-Client -> FastAPI -> verified identity -> LangGraph router
-                                           /          \
-                         SQL validation/execution    document retrieval
-                         SQLite or PostgreSQL RLS    tenant/role filter
-                                                      BM25 + optional Chroma
-```
+![Secure AI Query Gateway Architecture](docs/architecture.png)
 
 ## Tech stack
 
