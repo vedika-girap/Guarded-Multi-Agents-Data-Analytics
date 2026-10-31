@@ -72,7 +72,7 @@ def resolve_identity(
 
 def current_identity(
     authorization: str | None = Header(default=None),
-    x_role: str | None = Header(default=None),
+    x_role: str | None = Header(default=None, include_in_schema=False),
 ) -> Identity:
     return resolve_identity(authorization, get_settings(), x_role)
 
