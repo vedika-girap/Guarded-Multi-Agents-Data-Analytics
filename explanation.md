@@ -1,6 +1,6 @@
-# Code Flow and Current Architecture
+# Guarded Multi-Agent Analytics: Architecture
 
-This document describes the current implementation after Stage 4. It is a FastAPI analytics service with optional Gemini generation and embeddings, local SQLite document search, and a PostgreSQL backend for structured data when configured.
+This document describes the current implementation: a FastAPI analytics service with optional Gemini generation and embeddings, local SQLite document search, and an optional PostgreSQL backend for structured data.
 
 ## Architecture
 
@@ -68,7 +68,7 @@ PostgreSQL DDL and demo data are installed with `alembic upgrade head`. The Comp
 
 ### 6. Answer and evidence
 
-When Gemini is available and the graph has evidence, it synthesizes an answer and makes a second structured evidence-check request. Without Gemini, it returns evidence-shaped document text or SQL rows. The API response contains the answer, route, evidence, limitations, latency, and `llm_used`.
+When Gemini is available and the graph has evidence, it synthesizes an answer and makes a second structured evidence-check request. Without Gemini, it returns evidence-shaped document text or SQL rows. The Pydantic `AskResponse` schema in `app/api/models.py` contains `answer`, `route`, `evidence`, `limitations`, `latency_ms`, `llm_used`, `model_status`, `node_timings_ms`, and `provider_failures`.
 
 ## Provider failure handling and workflow timing
 
@@ -90,6 +90,17 @@ Gemini SDK failures are converted into stable categories before they reach the g
 | Evaluation | Deterministic offline report for retrieval hit@3, workflow evidence success, SQL rejection, tenant/viewer checks, and p50/p95 latency; separate tests and optional PostgreSQL integration |
 | Logs | Request-correlated structured role, route, latency, model status, provider categories, and node timings; no prompt/evidence/provider-body logging |
 
+## Where to change things
+
+| Topic | File | What to edit |
+|---|---|---|
+| Auth | `app/auth/policy.py`, `app/config.py` | JWT claim verification, roles, and auth settings |
+| Rate limits | `app/auth/limits.py`, `app/config.py` | Per-user limiter behavior, Redis integration, and limits |
+| SQL allowlist | `app/sql/queries.py` | SQL validation, approved columns/functions, and reviewed query templates |
+| Models | `app/graph/llm.py`, `app/graph/workflow.py`, `app/config.py` | Gemini request adapter, workflow use, and model settings |
+| Ingestion | `app/ingestion/documents.py`, `app/ingestion/index_vectors.py`, `app/retrieval/search.py` | Document chunking/indexing and retrieval behavior |
+| Evaluation | `app/evaluation/run.py`, `tests/` | Offline metrics, cases, and automated checks |
+
 ## Current limits
 
 - PostgreSQL cross-tenant enforcement requires migrations and a correctly configured restricted runtime role.
@@ -98,3 +109,5 @@ Gemini SDK failures are converted into stable categories before they reach the g
 - Document ingestion and vector refresh are run manually; background scheduling and production corpus operations remain future work.
 - The evaluation corpus is synthetic and small; the offline workflow score measures route/evidence presence, not answer groundedness. Live groundedness needs labeled human review.
 - Gemini failures use stable categories and safe fallbacks; retries, circuit breaking, dashboards, and alert thresholds remain future operational work.
+
+Suggested documentation organization: consider moving this file to `docs/architecture.md`.

@@ -1,6 +1,16 @@
-# Running the Plain English Data Assistant
+# Guarded Multi-Agent Analytics
 
 This manual covers the local development setup. The app starts with SQLite and development authentication, so Gemini and PostgreSQL are optional for the basic demo.
+
+## What is off by default
+
+| Feature | Default | How to enable |
+|---|---|---|
+| Gemini routing/answers | Off; deterministic routing and evidence-shaped answers | Set `GEMINI_API_KEY` in `.env` and restart |
+| Semantic search (Chroma) | Off; BM25 retrieval | Set `GEMINI_API_KEY`, then run `python -m app.ingestion.index_vectors` |
+| JWT auth and roles | Off; fixed viewer identity in dev mode | Set `AUTH_MODE=jwt` and configure issuer, audience, and secret |
+| PostgreSQL with row-level security | Off; SQLite | Configure PostgreSQL URLs/passwords, start Compose PostgreSQL, run migrations |
+| Shared Redis rate limiting | Off; process-local limiter | Start Redis and set `RATE_LIMIT_REDIS_URL` |
 
 ## Requirements
 
@@ -26,7 +36,7 @@ Open `.env` in an editor. For the default SQLite demo, leave `DATABASE_URL=sqlit
 
 ## 2. (Optional) Enable Gemini
 
-Create an API key in [Google AI Studio](https://ai.google.dev/gemini-api/docs/get-started?authuser=3&lang=python) and set it in `.env`:
+Create an API key in [Google AI Studio](https://ai.google.dev/gemini-api/docs/get-started?lang=python) and set it in `.env`:
 
 ```dotenv
 GEMINI_API_KEY=your-key-here
@@ -82,6 +92,134 @@ The response contains:
 - `provider_failures`: safe Gemini failure categories without provider response text
 
 Try document questions such as `What does the fiscal year mean?` or data questions such as `What is the total sales amount by region?`.
+
+### Demo the guarded behavior
+
+1. Set `AUTH_MODE=jwt` in `.env`, configure `AUTH_JWT_SECRET` (at least 32 bytes), `AUTH_JWT_ISSUER`, and `AUTH_JWT_AUDIENCE`, then restart the API.
+2. The following example is the content to save as `scripts/make_token.py`; it creates a short-lived HS256 bearer token for a selected role. The script is documentation only and is not included in the repository. Its claims match the verifier's required claims (`exp`, `iss`, `aud`, `sub`, `tenant_id`, `role`).
+
+   ```python
+   import os
+   import sys
+   import time
+
+   import jwt
+
+   role = sys.argv[1]
+   if role not in {"viewer", "analyst", "admin"}:
+       raise SystemExit("role must be viewer, analyst, or admin")
+
+   now = int(time.time())
+   token = jwt.encode(
+       {
+           "exp": now + 900,
+           "iss": os.environ["AUTH_JWT_ISSUER"],
+           "aud": os.environ["AUTH_JWT_AUDIENCE"],
+           "sub": f"demo-{role}",
+           "tenant_id": "local-dev-tenant",
+           "role": role,
+       },
+       os.environ["AUTH_JWT_SECRET"],
+       algorithm="HS256",
+   )
+   print(token)
+   ```
+
+   Generate one token per role from PowerShell after setting the three JWT variables in the process environment (or adapting the script to load `.env`): `python scripts/make_token.py viewer`, then repeat for `analyst` and `admin`.
+3. Send the same aggregate question with each token. Viewer SQL gets a `HAVING COUNT(*) >= VIEWER_MIN_GROUP_SIZE` condition; analyst SQL does not. Compare the returned `evidence` rows and `limitations`. The seeded demo rows currently have three records in each month, so this particular dataset does not produce a suppressed month; the tests cover suppression with a smaller group.
+
+   ```powershell
+   $token = "<paste-token-here>"
+   $body = @{ question = "What is the total sales amount by month?" } | ConvertTo-Json
+   Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/ask -ContentType "application/json" -Headers @{ Authorization = "Bearer $token" } -Body $body
+   ```
+
+   With the seeded data and Gemini disabled, the viewer response is:
+
+   ```json
+   {
+     "answer": "Query results: [{\"month\": \"2025-01\", \"total_sales\": 2450.0}, {\"month\": \"2025-02\", \"total_sales\": 1950.0}, {\"month\": \"2025-03\", \"total_sales\": 2400.0}, {\"month\": \"2025-04\", \"total_sales\": 2850.0}]",
+     "route": "data",
+     "evidence": [
+       {
+         "type": "query",
+         "query": "SELECT substr(sale_date, 1, 7) AS month, ROUND(SUM(amount), 2) AS total_sales FROM sales WHERE tenant_id = ? GROUP BY month HAVING COUNT(*) >= 3 ORDER BY month",
+         "rows": [
+           { "month": "2025-01", "total_sales": 2450.0 },
+           { "month": "2025-02", "total_sales": 1950.0 },
+           { "month": "2025-03", "total_sales": 2400.0 },
+           { "month": "2025-04", "total_sales": 2850.0 }
+         ]
+       }
+     ],
+     "limitations": [],
+     "llm_used": false,
+     "model_status": "disabled",
+     "provider_failures": []
+   }
+   ```
+
+   The analyst gets the same rows without the group-size filter:
+
+   ```json
+   {
+     "answer": "Query results: [{\"month\": \"2025-01\", \"total_sales\": 2450.0}, {\"month\": \"2025-02\", \"total_sales\": 1950.0}, {\"month\": \"2025-03\", \"total_sales\": 2400.0}, {\"month\": \"2025-04\", \"total_sales\": 2850.0}]",
+     "route": "data",
+     "evidence": [
+       {
+         "type": "query",
+         "query": "SELECT substr(sale_date, 1, 7) AS month, ROUND(SUM(amount), 2) AS total_sales FROM sales WHERE tenant_id = ? GROUP BY month ORDER BY month",
+         "rows": [
+           { "month": "2025-01", "total_sales": 2450.0 },
+           { "month": "2025-02", "total_sales": 1950.0 },
+           { "month": "2025-03", "total_sales": 2400.0 },
+           { "month": "2025-04", "total_sales": 2850.0 }
+         ]
+       }
+     ],
+     "limitations": [],
+     "llm_used": false,
+     "model_status": "disabled",
+     "provider_failures": []
+   }
+   ```
+
+4. Unsupported questions are returned without evidence. For example, ask about information outside the configured sources:
+
+   ```powershell
+   $body = @{ question = "What are the employee salaries?" } | ConvertTo-Json
+   Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/ask -ContentType "application/json" -Body $body
+   ```
+
+   The SQL safety test also verifies that a model-produced `DROP TABLE sales` is rejected by the SQL allowlist, including when it follows an injected question. The rejection response is surfaced as `route: unsupported` with a safety limitation.
+
+   Example responses (timings and request IDs vary):
+
+   ```json
+   {
+     "answer": "I can't answer that reliably with the currently configured sources and query catalog.",
+     "route": "unsupported",
+     "evidence": [],
+     "limitations": [
+       "Try a question about sales or a topic covered by the reporting documents."
+     ],
+     "llm_used": false,
+     "model_status": "disabled"
+   }
+   ```
+
+   When SQL generation returns `DROP TABLE sales`, the safety check rejects it before execution:
+
+   ```json
+   {
+     "answer": "The generated query was rejected by the SQL safety checks.",
+     "route": "unsupported",
+     "evidence": [],
+     "limitations": [
+       "Only validated read-only queries over approved sales columns can run."
+     ]
+   }
+   ```
 
 ### Add documents and enable semantic retrieval
 
@@ -148,7 +286,13 @@ The migration creates sample sales records, the approved sales view, and tenant-
 
 `AUTH_MODE=dev` is the local default. It always grants the fixed `local-dev-user` viewer identity; passing `X-Role` does not grant privileges.
 
-For JWT mode, set `AUTH_MODE=jwt` and configure `AUTH_JWT_SECRET` (at least 32 bytes), `AUTH_JWT_ISSUER`, and `AUTH_JWT_AUDIENCE` in `.env`. The identity provider must issue an HS256 token containing `exp`, `iss`, `aud`, `sub`, `tenant_id`, and `role` claims. Allowed roles are `viewer`, `analyst`, and `admin`. Send the token as `Authorization: Bearer <token>`. Production refuses to start in development auth mode. Do not enable JWT mode until those values match a trusted token issuer.
+For JWT mode, set `AUTH_MODE=jwt` and configure `AUTH_JWT_SECRET` (at least 32 bytes), `AUTH_JWT_ISSUER`, and `AUTH_JWT_AUDIENCE` in `.env`. Generate a development secret with:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Set `AUTH_JWT_ISSUER` to the exact issuer identifier (`iss`) from your trusted identity provider, and `AUTH_JWT_AUDIENCE` to the API audience (`aud`) registered there; these values are specific to your identity provider and API registration, so there are no universal defaults. The identity provider must issue an HS256 token containing `exp`, `iss`, `aud`, `sub`, `tenant_id`, and `role` claims. Allowed roles are `viewer`, `analyst`, and `admin`. Send the token as `Authorization: Bearer <token>`. Production refuses to start in development auth mode. Do not enable JWT mode until those values match a trusted token issuer.
 
 ## Run the evaluation and tests
 
@@ -167,6 +311,8 @@ Groundedness is reported as not_measured because live Gemini answer evaluation r
 
 ## Troubleshooting
 
+- **Swagger shows authorization and `x-role` fields:** `x-role` is ignored in development mode. `Authorization` is used only when `AUTH_MODE=jwt`.
+- **`llm_used` is false:** no Gemini key is configured, or a provider call failed. Check `model_status` and `provider_failures` in the response.
 - **`GEMINI_API_KEY` errors:** confirm `.env` is in the project root and the key is set; restart Uvicorn. Without a key, only deterministic supported paths are available.
 - **PostgreSQL connection refused:** confirm Docker Desktop is running and `docker compose ps` reports the database healthy.
 - **Alembic cannot connect:** verify both PostgreSQL URLs and their credentials in `.env`; run migrations after the database is healthy.

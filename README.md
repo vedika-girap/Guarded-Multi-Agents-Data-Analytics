@@ -41,45 +41,155 @@ Python, FastAPI, LangGraph, Gemini API, SQLite (demo) / PostgreSQL, SQLGlot, Ale
 
 ## Quick start
 
-```bash
-git clone https://github.com/<your-username>/secure-multi-agent-analytics.git
-cd secure-multi-agent-analytics
+Requires Python 3.11 or newer.
+
+```powershell
+git clone https://github.com/vedika-girap/Guarded-Multi-Agents-Data-Analytics.git
+cd Guarded-Multi-Agents-Data-Analytics
 
 python -m venv .venv
 .venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS/Linux
+```
 
+macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Continue with:
+
+```powershell
 pip install -r requirements.txt
-cp .env.example .env          # then edit .env (see below)
+Copy-Item .env.example .env
 
 uvicorn app.main:app --reload
 ```
+
+macOS/Linux: `cp .env.example .env`
 
 API docs: http://localhost:8000/docs
 
 For step-by-step local setup, API examples, optional Gemini and PostgreSQL configuration, and troubleshooting, see [manual.md](manual.md).
 
+## What you get by default vs. what you can enable
+
+| Feature | Default | How to enable | Details |
+|---|---|
+| Gemini routing/answers | Off; deterministic routing and evidence-shaped answers | Set `GEMINI_API_KEY` in `.env` and restart | [Gemini setup](manual.md#2-optional-enable-gemini) |
+| Semantic search (Chroma) | Off; BM25 retrieval | Set `GEMINI_API_KEY`, then run `python -m app.ingestion.index_vectors` | [Document retrieval](manual.md#add-documents-and-enable-semantic-retrieval) |
+| JWT auth and roles | Off; fixed viewer identity in dev mode | Set `AUTH_MODE=jwt` and configure issuer, audience, and secret | [Authentication modes](manual.md#authentication-modes) |
+| PostgreSQL with row-level security | Off; SQLite | Configure PostgreSQL URLs/passwords, start Compose PostgreSQL, run migrations | [PostgreSQL setup](manual.md#5-optional-run-with-postgresql) |
+| Shared Redis rate limiting | Off; process-local limiter | Start Redis and set `RATE_LIMIT_REDIS_URL` | [Shared rate limits](manual.md#shared-rate-limits-optional-locally) |
+
+## Try it
+
+With the API running in development mode, submit a supported question:
+
+```powershell
+$body = @{ question = "What is the total sales amount by region?" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/ask -ContentType "application/json" -Body $body
+```
+
+The response includes `route` (selected source path), `evidence` (query rows or document passages), `limitations` (caveats and fallback details), `llm_used` (whether Gemini contributed), `model_status` (disabled, available, used, or degraded), and `provider_failures` (safe provider failure categories). `llm_used: false` is expected when no Gemini key is configured.
+
+Example response with Gemini disabled (timings vary):
+
+```json
+{
+  "answer": "Query results: [{\"region\": \"North\", \"total_sales\": 3200.0}, {\"region\": \"South\", \"total_sales\": 3050.0}, {\"region\": \"West\", \"total_sales\": 3400.0}]",
+  "route": "data",
+  "evidence": [
+    {
+      "type": "query",
+      "query": "SELECT region, ROUND(SUM(amount), 2) AS total_sales FROM sales GROUP BY region ORDER BY region",
+      "rows": [
+        { "region": "North", "total_sales": 3200.0 },
+        { "region": "South", "total_sales": 3050.0 },
+        { "region": "West", "total_sales": 3400.0 }
+      ]
+    }
+  ],
+  "limitations": [],
+  "llm_used": false,
+  "model_status": "disabled",
+  "node_timings_ms": {
+    "discover": 0.2,
+    "generate_sql": 0.1,
+    "run_sql": 1.0,
+    "answer": 0.1
+  },
+  "provider_failures": [],
+  "latency_ms": 2.0
+}
+```
+
+With Gemini configured and the API restarted, a successful model-assisted answer has the same evidence but a model-written answer. The exact wording, generated SQL, and timings can vary:
+
+```json
+{
+  "answer": "Total sales were $3,200 in North, $3,050 in South, and $3,400 in West.",
+  "route": "data",
+  "evidence": [
+    {
+      "type": "query",
+      "query": "SELECT region, ROUND(SUM(amount), 2) AS total_sales FROM sales GROUP BY region ORDER BY region",
+      "rows": [
+        { "region": "North", "total_sales": 3200.0 },
+        { "region": "South", "total_sales": 3050.0 },
+        { "region": "West", "total_sales": 3400.0 }
+      ]
+    }
+  ],
+  "limitations": [],
+  "llm_used": true,
+  "model_status": "used",
+  "node_timings_ms": {
+    "discover": 1.2,
+    "generate_sql": 420.0,
+    "run_sql": 4.0,
+    "answer": 980.0
+  },
+  "provider_failures": [],
+  "latency_ms": 1410.0
+}
+```
+
+If `llm_used` is still `false`, check that `GEMINI_API_KEY` is set in the project-root `.env` and restart the API process.
+
+## Demo the guarded behavior
+
+Follow [Demo the guarded behavior](manual.md#demo-the-guarded-behavior) to compare viewer and analyst access and observe an unsafe SQL rejection.
+
 ## Configuration
 
 All settings live in `.env` (never commit this file). Every variable is documented in `.env.example`.
 
-| Variable | Purpose | Where to get it | Required |
-|---|---|---|---|
-| `GEMINI_API_KEY` | Gemini model access | Google AI Studio API keys | Optional; required for LLM responses |
-| `GEMINI_MODEL` | Gemini model name | Gemini API model catalog | Has default: `gemini-3.8-flash` |
-| `GEMINI_EMBEDDING_MODEL` | Embedding model for semantic document search | Gemini API model catalog | Has default: `gemini-embedding-001` |
-| `ENVIRONMENT` | `development`, `staging` or `production` | You choose | Has default |
-| `AUTH_MODE` | `dev` fixed identity or `jwt` verification | You choose; production requires `jwt` | Has default: `dev` |
-| `AUTH_JWT_SECRET` | HS256 verification secret (32+ bytes) | Your identity provider/shared-secret provisioning | Required with `AUTH_MODE=jwt` |
-| `AUTH_JWT_ISSUER` | Expected JWT issuer | Identity provider configuration | Required with `AUTH_MODE=jwt` |
-| `AUTH_JWT_AUDIENCE` | Expected JWT audience | Identity provider/API registration | Required with `AUTH_MODE=jwt` |
-| `DATABASE_URL` | SQL backend connection | Leave the default for SQLite; use PostgreSQL connection details for PG | Has default: SQLite demo |
-| `MIGRATION_DATABASE_URL` | PostgreSQL owner connection for Alembic | PostgreSQL admin/migration account | Required to run PG migrations |
-| `DATABASE_STATEMENT_TIMEOUT_MS` | PostgreSQL statement timeout | Tune for the workload | Has default: `5000` |
-| `VIEWER_MIN_GROUP_SIZE` | Minimum rows per viewer aggregate group | Set based on data disclosure policy | Has default: `3` |
-| `POSTGRES_PASSWORD` | Local PostgreSQL administrator password for Compose | Generate locally; do not commit | Required only for Compose |
-| `APP_DB_PASSWORD` | Local read-only app role password for Compose | Generate locally; do not commit | Required only for Compose |
-| `RATE_LIMIT_REDIS_URL` | Shared rate-limit store | Redis connection URL; required in production | Optional locally |
+| Variable | Purpose | Where to get it | Required / optional | Default |
+|---|---|---|---|---|
+| `GEMINI_API_KEY` | Gemini model access | Google AI Studio API keys | Optional; needed for model calls | Unset |
+| `GEMINI_MODEL` | Gemini model name | Gemini API model catalog | Optional | `gemini-3.8-flash` |
+| `GEMINI_EMBEDDING_MODEL` | Embedding model for semantic document search | Gemini API model catalog | Optional | `gemini-embedding-001` |
+| `ENVIRONMENT` | `development`, `staging` or `production` | You choose | Optional | `development` |
+| `AUTH_MODE` | `dev` fixed identity or `jwt` verification | You choose; production requires `jwt` | Optional | `dev` |
+| `AUTH_JWT_SECRET` | HS256 verification secret (32+ bytes) | Your identity provider/shared-secret provisioning | Required with `AUTH_MODE=jwt` | Unset |
+| `AUTH_JWT_ISSUER` | Expected JWT issuer | Identity provider configuration | Required with `AUTH_MODE=jwt` | Unset |
+| `AUTH_JWT_AUDIENCE` | Expected JWT audience | Identity provider/API registration | Required with `AUTH_MODE=jwt` | Unset |
+| `DATABASE_URL` | SQL backend connection | Leave default for SQLite; use PostgreSQL connection details for PG | Optional | `sqlite:///data/demo.db` |
+| `MIGRATION_DATABASE_URL` | PostgreSQL owner connection for Alembic | PostgreSQL admin/migration account | Required to run PG migrations | Unset |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | PostgreSQL statement timeout | Tune for the workload | Optional | `5000` |
+| `VIEWER_MIN_GROUP_SIZE` | Minimum rows per viewer aggregate group | Set based on data disclosure policy | Optional | `3` |
+| `POSTGRES_PASSWORD` | Local PostgreSQL administrator password for Compose | Generate locally; do not commit | Required only for Compose | Unset |
+| `APP_DB_PASSWORD` | Local read-only app role password for Compose | Generate locally; do not commit | Required only for Compose | Unset |
+| `RATE_LIMIT_REDIS_URL` | Shared rate-limit store | Redis connection URL; required in production | Optional locally | Unset |
+| `LLM_MAX_OUTPUT_TOKENS` | Maximum generated tokens per model call | Tune with evaluation | Optional | `700` |
+| `DEV_RATE_LIMIT_PER_MINUTE` | Development request limit per user | Tune for local use | Optional | `120` |
+| `STAGING_RATE_LIMIT_PER_MINUTE` | Staging request limit per user | Tune for staging | Optional | `60` |
+| `PRODUCTION_RATE_LIMIT_PER_MINUTE` | Production request limit per user | Tune for capacity/abuse policy | Optional | `30` |
+| `DEV_MAX_QUESTION_TOKENS` | Development question token limit | Tune for local use | Optional | `4096` |
+| `STAGING_MAX_QUESTION_TOKENS` | Staging question token limit | Tune for model/context | Optional | `2048` |
+| `PRODUCTION_MAX_QUESTION_TOKENS` | Production question token limit | Tune for model/context | Optional | `2048` |
+| `RATE_LIMIT_REDIS_TIMEOUT_SECONDS` | Redis connection/read timeout | Tune for the service | Optional | `0.5` |
 
 ## Security notes
 
@@ -117,6 +227,19 @@ python -m app.evaluation.run
 
 The offline evaluation prints measured BM25 hit@3, supported workflow rate, SQL rejection rate, tenant/role enforcement checks, and p50/p95 local workflow latency. Change the number of runs with `python -m app.evaluation.run --iterations 20`. It disables Gemini calls so results are repeatable and do not consume API quota. LLM answer groundedness is not included in this offline score; that requires a labeled, human-reviewed live-model evaluation set.
 
+One PostgreSQL integration test is skipped unless `TEST_POSTGRES_URL` is set to a migrated test database URL; that skip is expected.
+
+### Latest local results
+
+- Date: `2026-10-31`
+- Python version: `3.12.3`
+- Commit: `d9f6e85`
+- pytest pass/skip counts: `42 passed, 1 skipped`
+- hit@3: `100% (3/3)`
+- SQL rejection rate: `100% (4/4)`
+- p50: `3.78 ms`
+- p95: `5.58 ms`
+
 ## PostgreSQL local testing
 
 SQLite remains the default so `uvicorn app.main:app` still runs without a database service. To exercise the PostgreSQL backend, put distinct `POSTGRES_PASSWORD` and `APP_DB_PASSWORD` values in `.env`, then set:
@@ -137,34 +260,6 @@ uvicorn app.main:app
 The Compose init script creates a non-superuser login role for the app and a separate non-login role that owns the read view. The migration creates the tenant-keyed table, enables and forces RLS, installs a default-deny tenant/role policy, creates the approved `sales` view, and adds synthetic demo records. The app connection is read-only and receives tenant/role session settings for each request. Do not use the local demo credentials outside a developer machine.
 
 The PostgreSQL cross-tenant integration test runs when `TEST_POSTGRES_URL` points to the migrated `assistant_app` database URL; otherwise that one integration case is skipped. SQLite tenant isolation, aggregate suppression, query limits, and malicious SQL rejection run offline.
-
-## Setup checklist
-
-| Variable | What it is | Where to get it | Required or optional | Default |
-|---|---|---|---|---|
-| `ENVIRONMENT` | `development`, `staging`, or `production` | Choose for the deployment | Optional | `development` |
-| `AUTH_MODE` | Fixed local identity or verified JWT | Choose; production must use JWT | Optional | `dev` |
-| `AUTH_JWT_SECRET` | HS256 secret, at least 32 bytes | Provision from your identity provider/shared-secret store | Required for `AUTH_MODE=jwt` | Unset |
-| `AUTH_JWT_ISSUER` | Expected JWT issuer | Identity provider configuration | Required for `AUTH_MODE=jwt` | Unset |
-| `AUTH_JWT_AUDIENCE` | Expected API audience | Identity provider/API registration | Required for `AUTH_MODE=jwt` | Unset |
-| `GEMINI_API_KEY` | Gemini model credential | Create in Google AI Studio | Optional; required for model answers | Unset |
-| `GEMINI_MODEL` | Gemini model ID | Gemini API model catalog | Optional | `gemini-3.8-flash` |
-| `GEMINI_EMBEDDING_MODEL` | Gemini embedding model ID for Chroma vectors | Gemini API model catalog | Optional | `gemini-embedding-001` |
-| `LLM_MAX_OUTPUT_TOKENS` | Maximum generated tokens per model call | Tune with evaluation | Optional | `700` |
-| `DATABASE_URL` | Runtime structured-data database | SQLite default, or PostgreSQL DSN | Optional | `sqlite:///data/demo.db` |
-| `MIGRATION_DATABASE_URL` | PostgreSQL owner/admin DSN for Alembic | PostgreSQL administrator | Required to apply PostgreSQL migrations | Unset |
-| `DATABASE_STATEMENT_TIMEOUT_MS` | PostgreSQL query timeout | Tune to workload | Optional | `5000` |
-| `VIEWER_MIN_GROUP_SIZE` | Minimum records in a viewer aggregate cell | Set from disclosure policy | Optional | `3` |
-| `POSTGRES_PASSWORD` | Local Compose superuser password | Generate locally; keep in `.env` | Required only for PostgreSQL Compose | Unset |
-| `APP_DB_PASSWORD` | Local restricted application-role password | Generate locally; keep distinct from admin password | Required only for PostgreSQL Compose | Unset |
-| `DEV_RATE_LIMIT_PER_MINUTE` | Development per-user rate limit | Tune for local use | Optional | `120` |
-| `STAGING_RATE_LIMIT_PER_MINUTE` | Staging per-user rate limit | Tune for staging | Optional | `60` |
-| `PRODUCTION_RATE_LIMIT_PER_MINUTE` | Production per-user rate limit | Tune for capacity/abuse policy | Optional | `30` |
-| `DEV_MAX_QUESTION_TOKENS` | Development question token limit | Tune for local use | Optional | `4096` |
-| `STAGING_MAX_QUESTION_TOKENS` | Staging question token limit | Tune for model/context | Optional | `2048` |
-| `PRODUCTION_MAX_QUESTION_TOKENS` | Production question token limit | Tune for model/context | Optional | `2048` |
-| `RATE_LIMIT_REDIS_URL` | Shared rate-limit store | Redis URL; required with `ENVIRONMENT=production` | Optional locally | Unset |
-| `RATE_LIMIT_REDIS_TIMEOUT_SECONDS` | Redis connection/read timeout | Tune for the service | Optional | `0.5` |
 
 For local shared-limiter development, start Redis with `docker compose --profile shared-limits up -d redis` and set `RATE_LIMIT_REDIS_URL=redis://localhost:6379/0`. Production requires Redis; use a managed service secured with authentication, TLS, and network controls.
 
