@@ -267,7 +267,7 @@ Gemini's free tier is suitable for development experiments, subject to current m
 
 ## Project status
 
-Actively under development. See the [manual](manual.md), [CHANGELOG.md](CHANGELOG.md), and the scope notes near the top of this README.
+Actively under development. See the [manual](manual.md), [explanation](explanation.md) and the scope notes near the top of this README.
 
 
 ## Author
