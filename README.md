@@ -42,8 +42,8 @@ Python, FastAPI, LangGraph, Gemini API, SQLite (demo) / PostgreSQL, SQLGlot, Ale
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-username>/secure-multi-agent-analytics.git
-cd secure-multi-agent-analytics
+git clone https://github.com/vedika-girap/Guarded-Multi-Agents-Data-Analytics.git
+cd Guarded-Multi-Agents-Data-Analytics
 
 python -m venv .venv
 .venv\Scripts\activate        # Windows
