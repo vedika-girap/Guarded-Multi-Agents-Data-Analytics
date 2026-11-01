@@ -1,0 +1,44 @@
+# Exclude Git metadata and repository ignore rules; remove entries only when image builds need them.
+.git
+.gitignore
+
+# Keep credentials and local environment overrides out of the build context, while retaining the safe template.
+.env
+.env.*
+!.env.example
+
+# Exclude local Python environments, caches, and bytecode; these are recreated in the image.
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Exclude runtime databases and persistent Chroma state; startup seeds its own SQLite database.
+data/chroma/
+*.db
+*.sqlite
+*.sqlite3
+
+# Exclude logs, frontend dependencies, documentation images, and notes files.
+logs/
+*.log
+node_modules/
+docs/**/*.png
+docs/**/*.jpg
+docs/**/*.jpeg
+docs/**/*.webp
+docs/**/*.gif
+docs/**/*.svg
+notes/
+notes.*
+*.notes
+
+# Exclude editor metadata and Docker's own build instructions from the context where supported.
+.idea/
+.vscode/
+.vs/
+Dockerfile
+.dockerignore
