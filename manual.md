@@ -32,7 +32,7 @@ Copy-Item .env.example .env
 
 If PowerShell blocks activation, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in that terminal and activate again. This changes policy only for the current PowerShell process.
 
-Open `.env` in an editor. For the default SQLite demo, leave `DATABASE_URL=sqlite:///data/demo.db` and `AUTH_MODE=dev`. No database setup is needed. The app creates the demo database, sample sales, and sample reporting documents on startup.
+Open `.env` in an editor. The checked-in example intentionally enables staging demo mode, so replace `JWT_SECRET` with the generated 32-byte-or-longer value before starting. For the original local fixed-viewer setup, set `APP_ENV=development` and `DEMO_MODE=false`, and set `GEMINI_API_KEY=` if you do not want model calls; leave `DATABASE_URL=sqlite:///data/demo.db` and `AUTH_MODE=dev`. No database service or Gemini key is required for the deterministic local questions. The app creates the default demo database, sample sales, and sample reporting documents on startup.
 
 ## 2. (Optional) Enable Gemini
 
@@ -238,6 +238,12 @@ python -m app.ingestion.index_vectors
 ```
 
 Search combines Chroma semantic neighbors with BM25 results. Chroma's persistent local index is stored under `data/chroma/`. Without indexed vectors or if semantic search is unavailable, search falls back to BM25. Chroma's persistent local client is intended for development and testing; use a secured server-backed Chroma deployment for a deployed multi-user service.
+
+### Optional demo mode
+
+`DEMO_MODE` is off by default. When enabled, `/demo` serves the sample UI and `POST /demo/token` issues 30-minute HS256 tokens for only `viewer_a`, `analyst_a`, and `admin_b`. Set `JWT_SECRET` to at least 32 random bytes in staging/production; the existing `AUTH_JWT_SECRET` remains accepted. Demo mode requires a valid Bearer token and uses its role/tenant claims; the fixed local dev identity and ignored `X-Role` header are unchanged when demo mode is off.
+
+The `.env.example` contains conservative `DEMO_*` request limits. Demo IP and token limits are process-local, so run one instance for the sample deployment. The `/health` response includes mode, `demo_mode`, `gemini_key_configured`, and `chroma_index_exists` booleans/status only, never the API key. See [DEPLOY.md](DEPLOY.md) for staging instructions.
 
 ## Shared rate limits (optional locally)
 

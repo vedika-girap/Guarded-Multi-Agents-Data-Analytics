@@ -8,4 +8,5 @@ __pycache__/
 .env.*
 .env.example
 CHANGELOG.md
-
+/data/raw/
+/data/processed/
