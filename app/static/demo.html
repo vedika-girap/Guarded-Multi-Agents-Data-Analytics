@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guarded Analytics Demo</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #172033; background: #f3f6fb; }
+    body { max-width: 920px; margin: 0 auto; padding: 24px; }
+    .banner { padding: 14px 18px; border-radius: 8px; color: #102a43; background: #d9edf7; font-weight: 700; }
+    main { margin-top: 20px; padding: 22px; background: white; border: 1px solid #d6deea; border-radius: 10px; }
+    label { display: block; margin: 14px 0 6px; font-weight: 650; }
+    select, textarea, button { font: inherit; }
+    select, textarea { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #8997aa; border-radius: 6px; }
+    textarea { min-height: 84px; resize: vertical; }
+    button { cursor: pointer; border: 0; border-radius: 6px; padding: 9px 12px; color: white; background: #2457a7; }
+    button:hover { background: #173d79; }
+    .samples { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .samples button { color: #18324b; background: #e4edf7; text-align: left; }
+    .samples button:hover { background: #d1e0f0; }
+    #submit { margin-top: 10px; }
+    #status { margin: 16px 0 8px; font-weight: 700; }
+    #status.blocked, #status.denied { color: #a32626; }
+    #status.allowed { color: #176b3a; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: #f4f6f9; border-radius: 6px; }
+    footer { margin: 20px 2px; color: #526170; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <div class="banner">Demo mode — sample data only. Access is limited by the selected persona's signed tenant and role.</div>
+  <main>
+    <h1>Guarded Multi-Agent Analytics</h1>
+    <label for="persona">Persona</label>
+    <select id="persona">
+      <option value="viewer_a">Viewer A (tenant A)</option>
+      <option value="analyst_a">Analyst A (tenant A)</option>
+      <option value="admin_b">Admin B (tenant B)</option>
+    </select>
+
+    <h2>Sample questions</h2>
+    <div class="samples" id="samples">
+      <button data-persona="viewer_a" data-question="What was total revenue by month in 2011?">Viewer A: 2011 revenue by month</button>
+      <button data-persona="analyst_a" data-question="What are the top 5 products by revenue in the United Kingdom?">Analyst A: top UK products</button>
+      <button data-persona="admin_b" data-question="Show revenue by country excluding the United Kingdom.">Admin B: revenue by country</button>
+      <button data-persona="viewer_a" data-question="Delete all sales rows">Viewer A: blocked write request</button>
+      <button data-persona="viewer_a" data-question="Show tenant B's revenue by country">Viewer A: cross-tenant request</button>
+      <button data-persona="analyst_a" data-question="Which documents explain how cancellations are handled?">Analyst A: cancellation policy</button>
+    </div>
+
+    <label for="question">Question</label>
+    <textarea id="question" maxlength="1000" placeholder="Ask about sales or the reporting documents"></textarea>
+    <button id="submit" type="button">Ask</button>
+    <div id="status" role="status" aria-live="polite"></div>
+    <section>
+      <h2>Answer</h2>
+      <pre id="answer">Choose a sample or enter a question.</pre>
+      <p id="identity"></p>
+      <p id="route"></p>
+      <pre id="sql"></pre>
+    </section>
+  </main>
+  <footer>
+    Dataset attribution: UCI Machine Learning Repository, <em>Online Retail II</em>, Daqing Chen (2012),
+    <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.
+  </footer>
+  <script>
+    const persona = document.querySelector("#persona");
+    const question = document.querySelector("#question");
+    const status = document.querySelector("#status");
+    const answer = document.querySelector("#answer");
+    const identity = document.querySelector("#identity");
+    const route = document.querySelector("#route");
+    const sql = document.querySelector("#sql");
+
+    async function ask(value) {
+      status.className = "";
+      status.textContent = "Requesting short-lived demo token…";
+      answer.textContent = "";
+      sql.textContent = "";
+      identity.textContent = "";
+      route.textContent = "";
+      try {
+        const tokenResponse = await fetch("/demo/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ persona: persona.value })
+        });
+        const tokenData = await tokenResponse.json();
+        if (!tokenResponse.ok) throw new Error(tokenData.message || "Token request failed.");
+        const response = await fetch("/ask", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${tokenData.access_token}`
+          },
+          body: JSON.stringify({ question: value })
+        });
+        const data = await response.json();
+        identity.textContent = `Identity: ${tokenData.role} / ${tokenData.tenant_id}`;
+        if (response.status === 403) {
+          status.className = "denied";
+          status.textContent = "DENIED — tenant access is restricted.";
+          answer.textContent = data.message || "This identity cannot access the requested tenant.";
+          route.textContent = "Route: denied";
+          sql.textContent = "SQL: not run";
+          return;
+        }
+        if (!response.ok) throw new Error(data.message || "Request failed.");
+        answer.textContent = data.answer || "No answer returned.";
+        route.textContent = `Route: ${data.route} | Model: ${data.model_status}`;
+        const query = (data.evidence || []).find(item => item.type === "query");
+        sql.textContent = query ? `SQL: ${query.query}` : "";
+        if ((data.answer || "").includes("rejected by the SQL safety checks")) {
+          status.className = "blocked";
+          status.textContent = "BLOCKED — the read-only SQL guard rejected this request.";
+          sql.textContent = "SQL: not executed — rejected by the read-only guard.";
+        } else {
+          status.className = data.evidence && data.evidence.length ? "allowed" : "blocked";
+          status.textContent = data.evidence && data.evidence.length ? "Completed" : "No approved evidence returned.";
+        }
+      } catch (error) {
+        status.className = "blocked";
+        status.textContent = "Request unavailable";
+        answer.textContent = error.message || "The request could not be completed.";
+      }
+    }
+
+    document.querySelector("#submit").addEventListener("click", () => ask(question.value.trim()));
+    document.querySelector("#samples").addEventListener("click", event => {
+      const button = event.target.closest("button[data-question]");
+      if (!button) return;
+      persona.value = button.dataset.persona;
+      question.value = button.dataset.question;
+      ask(question.value);
+    });
+  </script>
+</body>
+</html>
