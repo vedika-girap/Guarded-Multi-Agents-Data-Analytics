@@ -63,6 +63,9 @@ Continue with:
 pip install -r requirements.txt
 Copy-Item .env.example .env
 
+# Generate a random secret and paste it into JWT_SECRET in .env (required by the example demo config).
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
 uvicorn app.main:app --reload
 ```
 
@@ -71,6 +74,14 @@ macOS/Linux: `cp .env.example .env`
 API docs: http://localhost:8000/docs
 
 For step-by-step local setup, API examples, optional Gemini and PostgreSQL configuration, and troubleshooting, see [manual.md](manual.md).
+
+The checked-in `.env.example` intentionally enables the guarded staging demo and will not start until its placeholder `JWT_SECRET` is replaced. To use the original fixed local viewer instead, set `APP_ENV=development` and `DEMO_MODE=false`, and clear `GEMINI_API_KEY` if you do not want model calls; no JWT secret or Gemini key is needed for the deterministic local questions.
+
+## Optional guarded demo mode
+
+Copy `.env.example` to `.env`, replace `JWT_SECRET` with a newly generated random value of at least 32 bytes, and set a demo-only `GEMINI_API_KEY` only if you want Gemini routing/answers or Chroma embeddings. The config also accepts the existing `AUTH_JWT_SECRET` and `ENVIRONMENT` names. With `DEMO_MODE=true`, the fixed personas are available at `/demo/token` and the one-page UI is at `/demo`; with the flag unset, these endpoints return 404 and the current development identity/X-Role behavior remains unchanged. Demo requests have separate IP/token rate limits and conservative question, row, timeout, and output-token caps.
+
+Use the Online Retail II commands below to populate tenant A/B with sample transactions. The runtime health endpoint reports the deployment mode and boolean Gemini/Chroma availability without exposing credentials. See [DEPLOY.md](DEPLOY.md) for a manual staging checklist and smoke test.
 
 ## What you get by default vs. what you can enable
 
@@ -218,6 +229,29 @@ python -m app.ingestion.index_vectors
 
 When vectors exist, search fuses Chroma semantic results with BM25 using reciprocal-rank fusion. Chroma stores its local index under `data/chroma/`; this persistent client is intended for local development and testing. For a deployed service, use a server-backed Chroma deployment and secure its network and access. If Gemini is not configured, the index has not been built, or semantic search fails, retrieval falls back to BM25. Document passages and their authoritative access metadata remain in SQLite even when sales data uses PostgreSQL.
 
+## Optional UCI Online Retail II sample
+
+Download the [UCI Online Retail II workbook](https://archive.ics.uci.edu/dataset/502/online+retail+ii) and place it at `data/raw/online_retail_II.xlsx`. Its two sheets are cleaned, aggregated by day/country/product, and deterministically capped to 50,000 rows by default. Customer IDs are discarded; UK rows map to `tenant-a`, and other countries map to `tenant-b`.
+
+```powershell
+python -m scripts.prepare_online_retail
+python -m scripts.load_sales_csv
+```
+
+The loader is explicit and idempotent. It only replaces rows previously loaded by this command; the regular SQLite seed and app startup do not require the workbook or generated CSV. To use real context for document questions, ingest the tenant-scoped definitions and policies before building vectors:
+
+```powershell
+python -m app.ingestion.documents .\docs\context\tenant-a --tenant-id tenant-a --min-role viewer
+python -m app.ingestion.documents .\docs\context\tenant-b --tenant-id tenant-b --min-role viewer
+python -m app.ingestion.index_vectors
+```
+
+The final command requires `GEMINI_API_KEY`; when vectors or Gemini are unavailable, document retrieval continues with SQLite BM25.
+
+**Dataset attribution:** UCI Machine Learning Repository, *Online Retail II*, Daqing Chen (2012), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), [dataset page](https://archive.ics.uci.edu/dataset/502/online+retail+ii).
+
+The included demo web UI repeats this attribution in its footer. In the prepared demo mapping, `tenant-a` is United Kingdom data and `tenant-b` is all other countries. The current schema stores only daily product revenue, so unit counts and average order value (which needs invoice IDs) are intentionally unavailable.
+
 ## Testing
 
 ```bash
@@ -231,14 +265,16 @@ One PostgreSQL integration test is skipped unless `TEST_POSTGRES_URL` is set to 
 
 ### Latest local results
 
-- Date: `2026-10-31`
-- Python version: `3.12.3`
-- Commit: `d9f6e85`
-- pytest pass/skip counts: `42 passed, 1 skipped`
+- Date: `2026-11-03`
+- Python version: `3.12.2`
+- Base revision: `c9493f4`
+- pytest pass/skip counts: `66 passed, 1 skipped`
 - hit@3: `100% (3/3)`
+- workflow success: `100% (10/10)`
 - SQL rejection rate: `100% (4/4)`
-- p50: `3.78 ms`
-- p95: `5.58 ms`
+- authorization checks: `100% (3/3)`
+- p50: `5.75 ms`
+- p95: `13.78 ms`
 
 ## PostgreSQL local testing
 
