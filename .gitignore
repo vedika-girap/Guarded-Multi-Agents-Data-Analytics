@@ -10,3 +10,5 @@ __pycache__/
 CHANGELOG.md
 /data/raw/
 /data/processed/
+/docs/context/
+.vscode

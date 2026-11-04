@@ -12,11 +12,34 @@ QUERIES = {
     "sales_by_product": ("SELECT product, ROUND(SUM(amount), 2) AS total_sales FROM sales GROUP BY product ORDER BY product", "Sales by product"),
     "sales_by_month": ("SELECT substr(sale_date,1,7) AS month, ROUND(SUM(amount), 2) AS total_sales FROM sales GROUP BY month ORDER BY month", "Sales by month"),
     "top_sale": ("SELECT sale_date, region, product, amount FROM sales ORDER BY amount DESC LIMIT 1", "Largest sale"),
+    "demo_monthly_revenue_2011": (
+        "SELECT substr(sale_date,1,7) AS month, ROUND(SUM(amount),2) AS total_sales "
+        "FROM sales WHERE sale_date >= '2011-01-01' AND sale_date < '2012-01-01' "
+        "GROUP BY 1 ORDER BY 1",
+        "2011 revenue by month",
+    ),
+    "demo_top_products_uk": (
+        "SELECT product, ROUND(SUM(amount),2) AS total_sales FROM sales "
+        "WHERE region = 'United Kingdom' GROUP BY product ORDER BY SUM(amount) DESC LIMIT 5",
+        "Top products in the United Kingdom",
+    ),
+    "demo_revenue_by_country": (
+        "SELECT region AS country, ROUND(SUM(amount),2) AS total_sales FROM sales "
+        "WHERE region <> 'United Kingdom' GROUP BY region ORDER BY SUM(amount) DESC LIMIT 100",
+        "Revenue by country excluding the United Kingdom",
+    ),
 }
 
 
 def select_query(question: str) -> str | None:
     q = question.lower()
+    if get_settings().demo_mode:
+        if "2011" in q and ("by month" in q or "monthly" in q):
+            return "demo_monthly_revenue_2011"
+        if "top" in q and "product" in q and "united kingdom" in q:
+            return "demo_top_products_uk"
+        if ("by country" in q or "per country" in q) and "united kingdom" in q:
+            return "demo_revenue_by_country"
     if "largest" in q or "highest" in q or "top sale" in q:
         return "top_sale"
     if "by region" in q or "per region" in q:
@@ -108,14 +131,21 @@ def execute_sql(
         else:
             tree.set("where", exp.Where(this=tenant_filter))
     # Enforce the cap even if the model requested a larger LIMIT.
-    tree = tree.limit(MAX_ROWS)
+    row_limit = min(MAX_ROWS, settings.demo_max_rows) if settings.demo_mode else MAX_ROWS
+    if settings.demo_mode:
+        existing_limit = tree.args.get("limit")
+        if existing_limit and isinstance(existing_limit.expression, exp.Literal):
+            requested_limit = existing_limit.expression.this
+            if existing_limit.expression.is_int and requested_limit.isdecimal():
+                row_limit = min(row_limit, int(requested_limit))
+    tree = tree.limit(row_limit)
     dialect = "postgres" if is_postgresql(settings) else "sqlite"
     safe_sql = tree.sql(dialect=dialect)
     with connect_readonly(tenant_id, role, settings) as db:
         if is_postgresql(settings):
-            rows = db.execute(safe_sql).fetchmany(MAX_ROWS)
+            rows = db.execute(safe_sql).fetchmany(row_limit)
         else:
-            rows = db.execute(safe_sql, (tenant_id,)).fetchmany(MAX_ROWS)
+            rows = db.execute(safe_sql, (tenant_id,)).fetchmany(row_limit)
     return [dict(row) for row in rows], safe_sql
 
 

@@ -118,13 +118,32 @@ def _enforce_redis_limit(identity: Identity, settings: Settings) -> None:
         )
 
 
-def enforce_request_limits(identity: Identity, question: str, settings: Settings | None = None) -> None:
+def enforce_request_limits(
+    identity: Identity,
+    question: str,
+    settings: Settings | None = None,
+    *,
+    client_ip: str | None = None,
+    access_token: str | None = None,
+) -> None:
     settings = settings or get_settings()
+    if settings.demo_mode and len(question) > settings.demo_max_question_length:
+        raise HTTPException(
+            status_code=413,
+            detail={"error_code": "QUESTION_LENGTH_LIMIT", "message": "The question exceeds the demo character limit."},
+        )
     if _question_tokens(question, settings.gemini_model) > settings.max_question_tokens:
         raise HTTPException(
             status_code=413,
             detail={"error_code": "QUESTION_TOKEN_LIMIT", "message": "The question exceeds the token limit for this environment."},
         )
+
+    if settings.demo_mode:
+        ip_digest = sha256((client_ip or "unknown").encode("utf-8")).hexdigest()
+        token_digest = sha256((access_token or identity.user_id).encode("utf-8")).hexdigest()
+        _enforce_local_limit(f"demo:ip:{ip_digest}", settings.demo_requests_per_minute)
+        _enforce_local_limit(f"demo:token:{token_digest}", settings.demo_requests_per_minute)
+        return
 
     if settings.rate_limit_redis_url:
         _enforce_redis_limit(identity, settings)

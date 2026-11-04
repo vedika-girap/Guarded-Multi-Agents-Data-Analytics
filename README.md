@@ -84,9 +84,8 @@ Copy `.env.example` to `.env`, replace `JWT_SECRET` with a newly generated rando
 Use the Online Retail II commands below to populate tenant A/B with sample transactions. The runtime health endpoint reports the deployment mode and boolean Gemini/Chroma availability without exposing credentials. See [DEPLOY.md](DEPLOY.md) for a manual staging checklist and smoke test.
 
 ## What you get by default vs. what you can enable
-
 | Feature | Default | How to enable | Details |
-|---|---|
+|---|---|---|---|
 | Gemini routing/answers | Off; deterministic routing and evidence-shaped answers | Set `GEMINI_API_KEY` in `.env` and restart | [Gemini setup](manual.md#2-optional-enable-gemini) |
 | Semantic search (Chroma) | Off; BM25 retrieval | Set `GEMINI_API_KEY`, then run `python -m app.ingestion.index_vectors` | [Document retrieval](manual.md#add-documents-and-enable-semantic-retrieval) |
 | JWT auth and roles | Off; fixed viewer identity in dev mode | Set `AUTH_MODE=jwt` and configure issuer, audience, and secret | [Authentication modes](manual.md#authentication-modes) |

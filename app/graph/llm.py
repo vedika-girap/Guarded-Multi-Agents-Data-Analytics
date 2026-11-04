@@ -74,23 +74,30 @@ def enabled() -> bool:
 def _client():
     from google import genai
 
-    api_key = get_settings().gemini_api_key
+    settings = get_settings()
+    api_key = settings.gemini_api_key
     if api_key is None:
         raise RuntimeError("GEMINI_API_KEY is not configured")
-    return genai.Client(api_key=api_key.get_secret_value(), http_options={"timeout": 30_000})
+    timeout_ms = int(settings.demo_request_timeout_seconds * 1000) if settings.demo_mode else 30_000
+    return genai.Client(api_key=api_key.get_secret_value(), http_options={"timeout": timeout_ms})
 
 
 def structured(name: str, schema: dict, instructions: str, input_text: str) -> dict:
     """Return schema-constrained JSON from Gemini."""
     del name  # Gemini response schemas do not use a named-schema parameter.
     settings = get_settings()
+    max_output_tokens = (
+        min(settings.llm_max_output_tokens, settings.demo_max_output_tokens)
+        if settings.demo_mode
+        else settings.llm_max_output_tokens
+    )
     try:
         interaction = _client().interactions.create(
             model=settings.gemini_model,
             system_instruction=instructions,
             input=input_text,
             response_format={"type": "text", "mime_type": "application/json", "schema": schema},
-            generation_config={"max_output_tokens": settings.llm_max_output_tokens},
+            generation_config={"max_output_tokens": max_output_tokens},
             store=False,
         )
     except GeminiProviderError:

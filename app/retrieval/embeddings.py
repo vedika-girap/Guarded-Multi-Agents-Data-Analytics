@@ -8,10 +8,12 @@ from app.config import get_settings
 def _client():
     from google import genai
 
-    key = get_settings().gemini_api_key
+    settings = get_settings()
+    key = settings.gemini_api_key
     if key is None:
         raise RuntimeError("GEMINI_API_KEY is not configured")
-    return genai.Client(api_key=key.get_secret_value(), http_options={"timeout": 30_000})
+    timeout_ms = int(settings.demo_request_timeout_seconds * 1000) if settings.demo_mode else 30_000
+    return genai.Client(api_key=key.get_secret_value(), http_options={"timeout": timeout_ms})
 
 
 def embed(text: str, task_type: str, title: str | None = None) -> list[float]:

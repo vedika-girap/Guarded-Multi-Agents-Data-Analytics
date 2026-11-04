@@ -14,6 +14,7 @@ from app.graph import llm, workflow
 from app.ingestion import seed
 from app.observability.logging import log_request
 from app.retrieval import search
+from app.sql import queries
 
 
 @pytest.mark.parametrize(
@@ -94,8 +95,8 @@ def test_request_log_has_timings_and_no_question_content(caplog):
 
 
 def test_ask_api_returns_timing_and_model_status(tmp_path, monkeypatch):
-    settings = Settings(_env_file=None)
     db_path = tmp_path / "api-test.db"
+    settings = Settings(database_url=f"sqlite:///{db_path.as_posix()}", _env_file=None)
     monkeypatch.setattr(seed, "DB_PATH", db_path)
     monkeypatch.setattr(seed, "DATA_DIR", tmp_path)
     monkeypatch.setattr(search, "DB_PATH", db_path)
@@ -104,6 +105,7 @@ def test_ask_api_returns_timing_and_model_status(tmp_path, monkeypatch):
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
     monkeypatch.setattr(limits, "get_settings", lambda: settings)
     monkeypatch.setattr(policy, "get_settings", lambda: settings)
+    monkeypatch.setattr(queries, "get_settings", lambda: settings)
     monkeypatch.setattr(llm, "enabled", lambda: False)
     with TestClient(app) as client:
         response = client.post("/ask", json={"question": "What does the fiscal year mean?"})

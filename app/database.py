@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
+from time import monotonic
 from typing import Iterator
 
 import psycopg
@@ -74,7 +75,8 @@ def connect_readonly(
     try:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only=ON")
-        connection.set_progress_handler(lambda: 1, 100_000)
+        deadline = monotonic() + settings.database_statement_timeout_ms / 1000
+        connection.set_progress_handler(lambda: monotonic() >= deadline, 1_000)
         yield connection
     except sqlite3.OperationalError as exc:
         if "interrupted" in str(exc).lower():

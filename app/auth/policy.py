@@ -15,6 +15,14 @@ class Identity:
 
 
 DEV_IDENTITY = Identity(user_id="local-dev-user", tenant_id="local-dev-tenant", role="viewer")
+DEMO_JWT_ISSUER = "guarded-multi-agent-demo"
+DEMO_JWT_AUDIENCE = "guarded-multi-agent-demo-api"
+# CHANGE HERE: Keep demo identities restricted to these fixed, non-sensitive personas.
+DEMO_PERSONAS = {
+    "viewer_a": {"role": "viewer", "tenant_id": "tenant-a"},
+    "analyst_a": {"role": "analyst", "tenant_id": "tenant-a"},
+    "admin_b": {"role": "admin", "tenant_id": "tenant-b"},
+}
 
 
 def _auth_error(status_code: int, error_code: str, message: str) -> HTTPException:
@@ -34,7 +42,7 @@ def resolve_identity(
     x_role remains an ignored argument during migration; it can never grant privileges.
     """
     del x_role
-    if settings.auth_mode == "dev":
+    if settings.auth_mode == "dev" and not settings.demo_mode:
         return DEV_IDENTITY
 
     if not authorization or not authorization.startswith("Bearer "):
@@ -42,7 +50,9 @@ def resolve_identity(
     token = authorization.removeprefix("Bearer ").strip()
     if not token:
         raise _auth_error(401, "AUTHENTICATION_REQUIRED", "Provide a valid Bearer token.")
-    if settings.auth_jwt_secret is None or not settings.auth_jwt_issuer or not settings.auth_jwt_audience:
+    issuer = DEMO_JWT_ISSUER if settings.demo_mode else settings.auth_jwt_issuer
+    audience = DEMO_JWT_AUDIENCE if settings.demo_mode else settings.auth_jwt_audience
+    if settings.auth_jwt_secret is None or not issuer or not audience:
         # This should be caught at startup, but keep the boundary safe if called directly.
         raise _auth_error(503, "AUTH_CONFIGURATION_ERROR", "JWT authentication is not configured.")
 
@@ -51,8 +61,8 @@ def resolve_identity(
             token,
             settings.auth_jwt_secret.get_secret_value(),
             algorithms=["HS256"],
-            issuer=settings.auth_jwt_issuer,
-            audience=settings.auth_jwt_audience,
+            issuer=issuer,
+            audience=audience,
             options={"require": ["exp", "iss", "aud", "sub", "tenant_id", "role"]},
         )
     except ExpiredSignatureError:
@@ -67,6 +77,10 @@ def resolve_identity(
         raise _auth_error(401, "INVALID_TOKEN_CLAIMS", "The access token is missing required identity claims.")
     if role not in ROLE_LEVELS:
         raise _auth_error(403, "ROLE_NOT_ALLOWED", "The access token contains an unsupported role.")
+    if settings.demo_mode:
+        persona = DEMO_PERSONAS.get(user_id)
+        if persona is None or (role, tenant_id) != (persona["role"], persona["tenant_id"]):
+            raise _auth_error(401, "INVALID_TOKEN_CLAIMS", "The access token is not a supported demo persona.")
     return Identity(user_id=user_id, tenant_id=tenant_id, role=role)
 
 

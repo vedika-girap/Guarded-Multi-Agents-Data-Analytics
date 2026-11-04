@@ -18,6 +18,8 @@ RUN useradd --create-home --uid 10001 appuser \
 
 # Copy only application code; add other required source directories here if the runtime starts using them.
 COPY app ./app
+COPY scripts ./scripts
+COPY docs/context ./docs/context
 
 # Drop root privileges for application startup and runtime data writes; change only with a reviewed permission need.
 USER appuser

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from time import perf_counter
 from typing import TypedDict
 
@@ -68,6 +69,11 @@ def _provider_failure(state: State, error: llm.GeminiProviderError, operation: s
 
 
 def discover(state: State) -> State:
+    if (
+        llm.get_settings().demo_mode
+        and re.search(r"\b(delete|drop|truncate|update|insert)\b", state["question"], flags=re.IGNORECASE)
+    ):
+        return {"route": "data", "llm_used": False}
     if llm.enabled():
         try:
             result = llm.structured(
@@ -81,17 +87,41 @@ def discover(state: State) -> State:
         except llm.GeminiProviderError as exc:
             failure = _provider_failure(state, exc, "route")
             fallback = _rule_route(state["question"])
+            if fallback == "unsupported":
+                _raise_if_demo_needs_model(state["question"])
             return {"route": fallback, "llm_used": False, **failure}
-    return {"route": _rule_route(state["question"]), "llm_used": False}
+    fallback = _rule_route(state["question"])
+    if fallback == "unsupported":
+        _raise_if_demo_needs_model(state["question"])
+    return {"route": fallback, "llm_used": False}
 
 
 def _rule_route(question: str) -> str:
     lowered = question.lower()
     if any(word in lowered for word in ("policy", "definition", "defined", "catalog", "fiscal year", "includes")):
         return "documents"
+    if llm.get_settings().demo_mode and any(word in lowered for word in (
+        "cancellation", "cancelled", "canceled", "average order value", "units sold",
+    )):
+        return "documents"
     if select_query(question):
         return "data"
     return "unsupported"
+
+
+def _raise_if_demo_needs_model(question: str) -> None:
+    if (
+        llm.get_settings().demo_mode
+        and re.search(r"\b(sales|revenue|product|country|region|monthly|month)\b", question, re.IGNORECASE)
+        and not select_query(question)
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "DEMO_MODEL_UNAVAILABLE",
+                "message": "Gemini is unavailable and no deterministic query template matches this question.",
+            },
+        )
 
 
 def retrieve(state: State) -> State:
@@ -102,12 +132,25 @@ def retrieve(state: State) -> State:
 
 
 def generate_sql(state: State) -> State:
+    if (
+        llm.get_settings().demo_mode
+        and re.search(r"\b(delete|drop|truncate|update|insert)\b", state["question"], flags=re.IGNORECASE)
+    ):
+        return {"sql": state["question"], "llm_used": False}
     if not llm.enabled():
         key = select_query(state["question"])
         if key:
             # Preserve the credential-free demo path using a reviewed SQL template.
             from app.sql.queries import QUERIES
             return {"sql": QUERIES[key][0]}
+        if llm.get_settings().demo_mode:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error_code": "DEMO_MODEL_UNAVAILABLE",
+                    "message": "Gemini is unavailable and no deterministic query template matches this question.",
+                },
+            )
         return {"route": "unsupported", "limitations": state.get("limitations", []) + ["SQL generation needs GEMINI_API_KEY for this question."]}
     try:
         result = llm.structured(
@@ -120,6 +163,18 @@ def generate_sql(state: State) -> State:
         return {"sql": result["sql"], "llm_used": True}
     except llm.GeminiProviderError as exc:
         failure = _provider_failure(state, exc, "sql")
+        key = select_query(state["question"])
+        if key and llm.get_settings().demo_mode:
+            from app.sql.queries import QUERIES
+            return {"sql": QUERIES[key][0], "llm_used": False, **failure}
+        if llm.get_settings().demo_mode:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error_code": "DEMO_MODEL_UNAVAILABLE",
+                    "message": "Gemini is unavailable and no deterministic query template matches this question.",
+                },
+            ) from None
         return {"route": "unsupported", **failure, "limitations": failure["limitations"] + ["SQL generation did not complete."]}
 
 
@@ -147,6 +202,8 @@ def run_sql(state: State) -> State:
 
 
 def synthesize_and_verify(state: State) -> State:
+    if llm.get_settings().demo_mode and state.get("answer"):
+        return {"answer": state["answer"], "limitations": state.get("limitations", [])}
     evidence = state.get("evidence", [])
     if not evidence:
         return {"answer": "I couldn't find evidence in the approved sources to answer this question.", "limitations": state.get("limitations", []) + ["No supporting evidence was found."]}

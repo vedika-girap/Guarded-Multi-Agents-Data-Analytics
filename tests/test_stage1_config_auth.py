@@ -100,3 +100,40 @@ def test_expired_token_is_401():
 def test_development_auth_is_rejected_in_production():
     with pytest.raises(ValidationError, match="AUTH_MODE=dev is forbidden"):
         Settings(environment="production", auth_mode="dev", _env_file=None)
+
+
+def test_demo_environment_aliases_and_strong_secret(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("JWT_SECRET", JWT_SECRET)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.environment == "staging"
+    assert settings.demo_mode is True
+    assert settings.auth_jwt_secret.get_secret_value() == JWT_SECRET
+
+
+def test_short_demo_secret_is_rejected_outside_local_development():
+    with pytest.raises(ValidationError, match="at least 32 bytes"):
+        Settings(
+            environment="staging",
+            demo_mode=True,
+            auth_jwt_secret=SecretStr("too-short"),
+            _env_file=None,
+        )
+
+
+def test_short_demo_secret_warns_in_local_development(monkeypatch, caplog):
+    import app.config as config
+
+    settings = Settings(
+        environment="development",
+        demo_mode=True,
+        auth_jwt_secret=SecretStr("too-short"),
+        _env_file=None,
+    )
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+
+    assert config.validate_runtime_settings() is settings
+    assert "shorter than 32 bytes" in caplog.text

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import router
-from app.config import validate_runtime_settings
+from app.config import DATA_DIR, get_settings, validate_runtime_settings
 from app.ingestion.seed import initialize
 
 
@@ -23,7 +23,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Plain English Data Assistant", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Data Assistant", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
 
 
@@ -60,4 +60,11 @@ async def validation_error_handler(request, _: RequestValidationError):
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "mode": "demo" if settings.demo_mode else settings.environment,
+        "demo_mode": settings.demo_mode,
+        "gemini_key_configured": settings.gemini_api_key is not None,
+        "chroma_index_exists": (DATA_DIR / "chroma" / "chroma.sqlite3").is_file(),
+    }

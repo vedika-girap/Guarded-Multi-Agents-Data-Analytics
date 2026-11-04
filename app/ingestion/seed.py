@@ -58,6 +58,8 @@ def initialize() -> None:
         sales_columns = {row[1] for row in db.execute("PRAGMA table_info(sales)")}
         if "tenant_id" not in sales_columns:
             db.execute("ALTER TABLE sales ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'local-dev-tenant'")
+        db.execute("CREATE INDEX IF NOT EXISTS sales_tenant_date_idx ON sales(tenant_id,sale_date)")
+        db.execute("CREATE INDEX IF NOT EXISTS sales_tenant_region_idx ON sales(tenant_id,region)")
         sales = db.execute(
             "SELECT sale_date,region,product,amount,tenant_id FROM sales ORDER BY sale_date,region,product"
         ).fetchall()
